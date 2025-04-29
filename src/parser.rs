@@ -458,6 +458,9 @@ fn media_playlist_from_tags(mut tags: Vec<MediaPlaylistTag>) -> MediaPlaylist {
                     encryption_key = None;
                     map = None;
                 }
+                SegmentTag::C2PA(c2pa) => {
+                    next_segment.c2pa = c2pa;
+                }
                 _ => (),
             },
         }
@@ -489,6 +492,7 @@ enum SegmentTag {
     Unknown(ExtTag),
     Comment(Option<String>),
     Uri(String),
+    C2PA(Option<String>),
 }
 
 fn media_segment_tag(i: &[u8]) -> IResult<&[u8], SegmentTag> {
@@ -515,10 +519,20 @@ fn media_segment_tag(i: &[u8]) -> IResult<&[u8], SegmentTag> {
         map(pair(tag("#EXT-X-DATERANGE:"), daterange), |(_, range)| {
             SegmentTag::DateRange(range)
         }),
+        map(pair(tag("#EXT-X-C2PA:"), c2pa), |(_, c2pa)| {
+            SegmentTag::C2PA(c2pa)
+        }),
         map(ext_tag, SegmentTag::Unknown),
         map(comment_tag, SegmentTag::Comment),
         map(consume_line, SegmentTag::Uri),
     ))(i)
+}
+
+fn c2pa(i: &[u8]) -> IResult<&[u8], Option<String>> {
+    map(
+        pair(map_res(not_line_ending, from_utf8_slice), opt(line_ending)),
+        |(line, _)| Some(line),
+    )(i)
 }
 
 fn duration_title_tag(i: &[u8]) -> IResult<&[u8], (f32, Option<String>)> {
@@ -566,10 +580,19 @@ fn extmap(i: &[u8]) -> IResult<&[u8], Map> {
             None => Ok(None),
         }?;
 
+        let c2pa = match attrs.remove("C2PA") {
+            Some(QuotedOrUnquoted::Quoted(s)) => Some(s),
+            Some(QuotedOrUnquoted::Unquoted(_)) => {
+                return Err("Can't create C2PA attribute from unquoted string")
+            }
+            _ => None,
+        };
+
         Ok(Map {
             uri,
             byte_range,
             other_attributes: attrs,
+            c2pa,
         })
     })(i)
 }
@@ -783,6 +806,8 @@ fn unquoted_from_utf8_slice(s: &[u8]) -> Result<QuotedOrUnquoted, string::FromUt
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
     use nom::AsBytes;
 
@@ -1000,5 +1025,56 @@ mod tests {
         assert!(!is_master_playlist(
             "#EXTM3U\n#EXT-X-VERSION:5\n#EXT-X-TARGETDU".as_bytes()
         ));
+    }
+
+    #[test]
+    fn c2pa() {
+        let manifest = "#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:2
+#EXT-X-MEDIA-SEQUENCE:1
+#EXT-X-MAP:URI=\"1/segment_init.m4s\",C2PA=\"[0, 1, 2, 3, 4]\"
+#EXT-X-PROGRAM-DATE-TIME:2025-04-10T14:43:06.000+0200
+#EXTINF:1.92,
+#EXT-X-C2PA:[10, 20, 30, 100]
+1/segment_000000001.m4s
+#EXT-X-ENDLIST
+";
+
+        let media = parse_media_playlist_res(manifest.as_bytes());
+        let mut exp = MediaPlaylist {
+            version: Some(6),
+            target_duration: 2,
+            media_sequence: 1,
+            end_list: true,
+            ..Default::default()
+        };
+
+        let mut seg = MediaSegment::empty();
+        seg.c2pa = Some("[10, 20, 30, 100]".to_string());
+        seg.uri = "1/segment_000000001.m4s".to_string();
+        seg.duration = 1.92;
+        seg.unknown_tags = vec![ExtTag {
+            tag: "X-PROGRAM-DATE-TIME".to_string(),
+            rest: Some("2025-04-10T14:43:06.000+0200".to_string()),
+        }];
+
+        let map = Map {
+            uri: "1/segment_init.m4s".to_string(),
+            byte_range: None,
+            c2pa: Some("[0, 1, 2, 3, 4]".to_string()),
+            other_attributes: Default::default(),
+        };
+        seg.map = Some(map);
+        exp.segments = vec![seg];
+
+        assert_eq!(media, Ok(exp.clone()));
+
+        let mut buf = Cursor::new(Vec::new());
+        exp.write_to(&mut buf).unwrap();
+
+        let buf = buf.into_inner();
+
+        assert_eq!(manifest, String::from_utf8_lossy(&buf));
     }
 }

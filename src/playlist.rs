@@ -845,6 +845,8 @@ pub struct MediaSegment {
     pub program_date_time: Option<chrono::DateTime<chrono::FixedOffset>>,
     /// `#EXT-X-DATERANGE:<attribute-list>`
     pub daterange: Option<DateRange>,
+    /// `#EXT-X-C2PA:<byte-array>`
+    pub c2pa: Option<String>,
     /// `#EXT-`
     pub unknown_tags: Vec<ExtTag>,
 }
@@ -902,6 +904,10 @@ impl MediaSegment {
             writeln!(w, "{}", v)?;
         } else {
             writeln!(w)?;
+        }
+
+        if let Some(ref c2pa) = self.c2pa {
+            writeln!(w, "#EXT-X-C2PA:{c2pa}")?;
         }
 
         writeln!(w, "{}", self.uri)
@@ -1012,6 +1018,7 @@ impl Key {
 pub struct Map {
     pub uri: String,
     pub byte_range: Option<ByteRange>,
+    pub c2pa: Option<String>,
     pub other_attributes: HashMap<String, QuotedOrUnquoted>,
 }
 
@@ -1022,6 +1029,9 @@ impl Map {
             write!(w, ",BYTERANGE=\"")?;
             byte_range.write_value_to(w)?;
             write!(w, "\"")?;
+        }
+        if let Some(ref c2pa) = self.c2pa {
+            write!(w, ",C2PA=\"{c2pa}\"")?;
         }
         Ok(())
     }
