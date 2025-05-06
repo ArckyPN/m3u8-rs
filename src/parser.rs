@@ -218,6 +218,7 @@ enum MasterPlaylistTag {
     SessionKey(SessionKey),
     Start(Start),
     IndependentSegments,
+    #[allow(dead_code)]
     Comment(Option<String>),
     Uri(String),
     Unknown(ExtTag),
@@ -490,6 +491,7 @@ enum SegmentTag {
     ProgramDateTime(chrono::DateTime<chrono::FixedOffset>),
     DateRange(DateRange),
     Unknown(ExtTag),
+    #[allow(dead_code)]
     Comment(Option<String>),
     Uri(String),
     C2PA(Option<String>),
